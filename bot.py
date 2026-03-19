@@ -217,7 +217,7 @@ class AIBot:
 # ========== التشغيل ==========
 def main():
     bot = AIBot()
-    app = Application.builder().token(8762789105:AAHpHmY9sWUZXj38yXzYMtaWAJkXV9dysFo).build()
+    app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", bot.start))
     
