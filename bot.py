@@ -1,7 +1,35 @@
+import os
+import sys
+
+# ========== التحقق من المتغيرات قبل كل شيء ==========
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
+FISH_AUDIO_API_KEY = os.environ.get("FISH_AUDIO_API_KEY", "").strip()
+ADMIN_ID = os.environ.get("ADMIN_ID", "0").strip()
+
+print("=" * 50)
+print("🔍 Checking environment variables...")
+print(f"BOT_TOKEN exists: {'Yes' if BOT_TOKEN else 'No'}")
+print(f"BOT_TOKEN length: {len(BOT_TOKEN)}")
+print(f"FISH_AUDIO_API_KEY exists: {'Yes' if FISH_AUDIO_API_KEY else 'No'}")
+print(f"ADMIN_ID: {ADMIN_ID}")
+print("=" * 50)
+
+if not BOT_TOKEN:
+    print("❌ ERROR: BOT_TOKEN is not set!")
+    print("Please add BOT_TOKEN to Railway Variables")
+    sys.exit(1)
+
+if ":" not in BOT_TOKEN:
+    print("❌ ERROR: BOT_TOKEN is invalid!")
+    print("Token should be like: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+    sys.exit(1)
+
+print("✅ BOT_TOKEN is valid, starting bot...")
+
+# ========== بقية الاستيرادات ==========
 import asyncio
 import logging
 import tempfile
-import os
 import aiosqlite
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -12,29 +40,13 @@ from telegram.ext import (
 import aiohttp
 
 # ========== الإعدادات ==========
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-FISH_AUDIO_API_KEY = os.getenv("FISH_AUDIO_API_KEY", "")
-TWOSHOT_API_KEY = os.getenv("TWOSHOT_API_KEY", "")
 MAX_DAILY_REQUESTS = 10
 
 # ========== لوحات المفاتيح ==========
 def main_menu_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎙️ تحويل نص لصوت", callback_data="tts"),
-         InlineKeyboardButton("🎵 توليد أغنية", callback_data="music")],
-        [InlineKeyboardButton("🎭 استنساخ صوتي", callback_data="clone_voice"),
-         InlineKeyboardButton("📊 احصائياتي", callback_data="my_stats")],
+        [InlineKeyboardButton("🎙️ تحويل نص لصوت", callback_data="tts")],
         [InlineKeyboardButton("❓ المساعدة", callback_data="help")]
-    ])
-
-def music_genres_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎸 روك", callback_data="genre_rock"),
-         InlineKeyboardButton("🎹 بوب", callback_data="genre_pop")],
-        [InlineKeyboardButton("🎤 هيب هوب", callback_data="genre_hip-hop"),
-         InlineKeyboardButton("🎻 كلاسيكية", callback_data="genre_classical")],
-        [InlineKeyboardButton("🔙 رجوع", callback_data="back_main")]
     ])
 
 # ========== قاعدة البيانات ==========
@@ -48,7 +60,6 @@ class Database:
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
-                    first_name TEXT,
                     daily_count INTEGER DEFAULT 0,
                     last_request DATE,
                     total_requests INTEGER DEFAULT 0
@@ -63,13 +74,6 @@ class Database:
                 (user_id, username, first_name)
             )
             await db.commit()
-    
-    async def get_user(self, user_id):
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as c:
-                row = await c.fetchone()
-                return dict(row) if row else None
     
     async def check_daily_limit(self, user_id, limit):
         today = datetime.now().date()
@@ -93,12 +97,6 @@ class Database:
                 (today.isoformat(), user_id)
             )
             await db.commit()
-    
-    async def get_stats(self):
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT COUNT(*) FROM users") as c:
-                users = (await c.fetchone())[0]
-            return {"total_users": users, "total_requests": 0}
 
 # ========== Fish Audio ==========
 class FishAudioService:
@@ -122,7 +120,7 @@ class FishAudioService:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TTS_TEXT, MUSIC_PROMPT, MUSIC_GENRE, CLONE_VOICE = range(4)
+TTS_TEXT = 0
 
 class AIBot:
     def __init__(self):
@@ -135,8 +133,7 @@ class AIBot:
         
         await update.message.reply_text(
             f"🤖 أهلاً {user.first_name}!\n\n"
-            "🎙️ تحويل نص ← صوت\n"
-            "🎵 توليد أغاني\n"
+            "🎙️ أرسل نصاً لتحويله لصوت\n"
             f"📊 {MAX_DAILY_REQUESTS} طلبات/يوم",
             reply_markup=main_menu_keyboard()
         )
@@ -147,28 +144,10 @@ class AIBot:
         data = query.data
         
         if data == "tts":
-            await query.edit_message_text("📝 أرسل النص:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="back_main")]]))
+            await query.edit_message_text("📝 أرسل النص:")
             return TTS_TEXT
-            
-        elif data == "music":
-            await query.edit_message_text("🎵 اختر النوع:", reply_markup=music_genres_keyboard())
-            return MUSIC_GENRE
-            
-        elif data == "my_stats":
-            user = await self.db.get_user(update.effective_user.id)
-            text = f"📊 طلباتك: {user['total_requests'] if user else 0}\nاليوم: {user['daily_count'] if user else 0}/{MAX_DAILY_REQUESTS}"
-            await query.edit_message_text(text, reply_markup=main_menu_keyboard())
-            
         elif data == "help":
-            await query.edit_message_text("📝 أرسل نصاً لتحويله\n🎵 اختر نوعاً ثم أرسل وصفاً", reply_markup=main_menu_keyboard())
-            
-        elif data == "back_main":
-            await query.edit_message_text("القائمة:", reply_markup=main_menu_keyboard())
-            
-        elif data.startswith("genre_"):
-            context.user_data["genre"] = data.replace("genre_", "")
-            await query.edit_message_text("📝 أرسل وصف الأغنية:")
-            return MUSIC_PROMPT
+            await query.edit_message_text("📝 أرسل أي نص", reply_markup=main_menu_keyboard())
         
         return ConversationHandler.END
     
@@ -200,21 +179,12 @@ class AIBot:
                 await self.db.increment_usage(user_id)
                 await msg.delete()
             else:
-                await msg.edit_text("❌ فشل التحويل")
+                await msg.edit_text("❌ فشل التحويل. تحقق من FISH_AUDIO_API_KEY")
         except Exception as e:
             await msg.edit_text(f"❌ خطأ: {str(e)}")
         
         return ConversationHandler.END
-    
-    async def handle_music(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("🎵 قريباً!", reply_markup=main_menu_keyboard())
-        return ConversationHandler.END
-    
-    async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("❌ تم الإلغاء", reply_markup=main_menu_keyboard())
-        return ConversationHandler.END
 
-# ========== التشغيل ==========
 def main():
     bot = AIBot()
     app = Application.builder().token(BOT_TOKEN).build()
@@ -224,23 +194,14 @@ def main():
     app.add_handler(ConversationHandler(
         entry_points=[CallbackQueryHandler(bot.button, pattern="^tts$")],
         states={TTS_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_tts)]},
-        fallbacks=[CommandHandler("cancel", bot.cancel)]
+        fallbacks=[CommandHandler("cancel", lambda u,c: u.message.reply_text("❌ إلغاء"))]
     ))
     
-    app.add_handler(ConversationHandler(
-        entry_points=[CallbackQueryHandler(bot.button, pattern="^music$")],
-        states={
-            MUSIC_GENRE: [CallbackQueryHandler(bot.button, pattern="^genre_")],
-            MUSIC_PROMPT: [MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_music)]
-        },
-        fallbacks=[CommandHandler("cancel", bot.cancel)]
-    ))
-    
-    app.add_handler(CallbackQueryHandler(bot.button, pattern="^(my_stats|help|back_main)"))
+    app.add_handler(CallbackQueryHandler(bot.button, pattern="^(help|back_main)"))
     
     app.post_init = lambda app: bot.db.init()
     
-    print("🤖 Bot running...")
+    print("✅ Bot started successfully!")
     app.run_polling()
 
 if __name__ == "__main__":
